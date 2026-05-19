@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>幸運抽名字遊戲 (JSON 雲端同步版)</title>
+    <title>幸運抽名字遊戲 (強制解卡同步版)</title>
     <style>
         :root {
             --primary-color: #4a90e2;
@@ -12,10 +12,11 @@
             --dark-color: #2c3e50;
             --light-color: #ecf0f1;
             --json-color: #f39c12;
+            --reset-color: #9b59b6;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
         body { background: #f5f7fa; color: var(--dark-color); display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
-        .container { width: 100%; max-width: 600px; background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); overflow: hidden; }
+        .container { width: 100%; max-width: 600px; background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); overflow: hidden; margin-bottom: 20px; }
         
         .tabs { display: flex; background: var(--dark-color); }
         .tab-btn { flex: 1; padding: 15px; border: none; background: transparent; color: #95a5a6; font-size: 16px; cursor: pointer; transition: 0.3s; font-weight: bold; }
@@ -24,10 +25,14 @@
         .panel { padding: 30px; display: none; }
         .panel.active { display: block; }
         
-        .display-box { height: 120px; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: bold; background: var(--light-color); border-radius: 8px; margin-bottom: 20px; border: 2px dashed #bdc3c7; color: var(--primary-color); overflow: hidden; text-align: center; }
+        .display-box { height: 120px; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: bold; background: var(--light-color); border-radius: 8px; margin-bottom: 20px; border: 2px dashed #bdc3c7; color: var(--primary-color); overflow: hidden; text-align: center; flex-direction: column; position: relative; }
+        
         .btn { width: 100%; padding: 12px; font-size: 18px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 10px; }
         .btn-start { background: var(--primary-color); color: white; }
         .btn-start:hover { background: #357abd; }
+        .btn-start:disabled { background: #bdc3c7; cursor: not-allowed; }
+        .btn-reset { background: var(--reset-color); color: white; }
+        .btn-reset:hover { background: #8e44ad; }
         .btn-delete { background: var(--danger-color); color: white; padding: 5px 10px; font-size: 14px; width: auto; margin: 0; }
         
         .input-group { display: flex; gap: 10px; margin-bottom: 20px; }
@@ -36,13 +41,26 @@
         .name-list { list-style: none; max-height: 250px; overflow-y: auto; border: 1px solid var(--light-color); border-radius: 6px; }
         .name-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-bottom: 1px solid var(--light-color); }
         
-        .file-actions { display: flex; gap: 10px; margin-top: 15px; }
-        .btn-file { flex: 1; padding: 10px; font-size: 14px; background: var(--json-color); color: white; border: none; border-radius: 6px; cursor: pointer; text-align: center; font-weight: bold; }
+        .file-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 15px; }
+        .btn-file { width: 100%; padding: 10px; font-size: 14px; background: var(--json-color); color: white; border: none; border-radius: 6px; cursor: pointer; text-align: center; font-weight: bold; }
+        .btn-import { background: #e67e22; } /* 強制上傳按鈕樣式 */
         .count-info { font-size: 14px; color: #7f8c8d; align-self: center; }
         .flex-space { display: flex; justify-content: space-between; margin-top: 15px; }
+
+        .history-card { width: 100%; max-width: 600px; background: white; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.05); padding: 20px; }
+        .history-title { font-size: 18px; font-weight: bold; color: var(--dark-color); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--light-color); padding-bottom: 8px; }
+        .history-list { list-style: none; max-height: 180px; overflow-y: auto; font-size: 14px; }
+        .history-item { padding: 8px 12px; border-bottom: 1px dashed var(--light-color); display: flex; justify-content: space-between; color: #555; }
+        .history-item span.winner-name { font-weight: bold; color: var(--danger-color); font-size: 16px; }
+        .btn-clear-history { font-size: 12px; padding: 4px 8px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-clear-history:hover { background: #7f8c8d; }
+
+        #confetti-canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 999; }
     </style>
 </head>
 <body>
+
+<canvas id="confetti-canvas"></canvas>
 
 <div class="container">
     <div class="tabs">
@@ -52,8 +70,11 @@
 
     <!-- 抽籤前台 -->
     <div id="front-panel" class="panel active">
-        <div class="display-box" id="result-display">正在載入雲端名單...</div>
+        <div class="display-box">
+            <div id="result-display">準備抽籤...</div>
+        </div>
         <button class="btn btn-start" id="draw-btn" onclick="startDraw()" disabled>請稍候...</button>
+        <button class="btn btn-reset" id="reset-btn" onclick="resetDrawPool()">🔄 重設抽籤名單 (RESET)</button>
     </div>
 
     <!-- 管理後台 -->
@@ -65,65 +86,128 @@
         <ul class="name-list" id="name-list-ui"></ul>
         
         <div class="flex-space">
-            <div class="count-info" id="count-info">目前人數：0 人</div>
+            <div class="count-info" id="count-info">總名單人數：0 人</div>
         </div>
 
         <div class="file-actions">
-            <button class="btn-file" onclick="exportJson()">💾 匯出更新後的 names.json</button>
+            <!-- ⚡ 隱藏的原生檔案選擇器 -->
+            <input type="file" id="json-file-input" accept=".json" style="display: none;" onchange="importJsonFile(this)">
+            <!-- ⚡ 必殺技：手動強制導入按鈕 -->
+            <button class="btn-file btn-import" onclick="document.getElementById('json-file-input').click()">📂 點此選取並載入 config.json (強制更新 36 人)</button>
+            <button class="btn-file" onclick="exportJson()">💾 匯出更新後的 config.json</button>
         </div>
     </div>
 </div>
 
+<div class="history-card">
+    <div class="history-title">
+        <span>📜 中獎歷史紀錄</span>
+        <button class="btn-clear-history" onclick="clearHistory()">清空歷史</button>
+    </div>
+    <ul class="history-list" id="history-list-ui">
+        <li style="color:#aaa; text-align:center; padding:10px;">暫無中獎紀錄</li>
+    </ul>
+</div>
+
 <script>
-    let nameList = [];
+    const BACKSTAGE_PASSWORD = "INS"; 
+    const DEFAULT_NAMES = ['張小明', '王大同', '陳阿華', '林美玲'];
+
+    let nameList = [];        
+    let drawPool = [];        
+    let shuffleList = [];     
+    let currentIndex = 0; 
     let isDrawing = false;
     let timer = null;
+    let historyRecords = []; 
 
-    // 網頁載入時，自動抓取同目錄下的 names.json
     window.addEventListener('DOMContentLoaded', () => {
-        fetch('names.json')
-            .then(response => {
-                if (!response.ok) throw new Error('找不到 json 檔案');
-                return response.json();
-            })
+        historyRecords = JSON.parse(localStorage.getItem('luckyDrawHistory')) || [];
+        renderHistoryList();
+
+        // 嘗試抓取同目錄下的 config.json
+        fetch('config.json')
+            .then(response => { if (!response.ok) throw new Error(); return response.json(); })
             .then(data => {
-                // 成功讀取伺服器上的 JSON 名單
                 nameList = data;
                 initApp();
             })
-            .catch(error => {
-                console.log('無法讀取 names.json，將嘗試讀取本地快取', error);
-                // 備用方案：若沒上傳 json，則讀取本地快取或給預設值
-                nameList = JSON.parse(localStorage.getItem('luckyDrawNames')) || ['張小明', '王大同'];
+            .catch(() => {
+                // 如果抓不到（例如本地直接開啟 HTML），就抓 LocalStorage 
+                nameList = JSON.parse(localStorage.getItem('luckyDrawNames')) || [...DEFAULT_NAMES];
                 initApp();
             });
     });
 
     function initApp() {
+        drawPool = [...nameList];
         document.getElementById('result-display').innerText = '準備抽籤...';
-        document.getElementById('draw-btn').removeAttribute('disabled');
-        document.getElementById('draw-btn').innerText = '開始抽籤';
+        checkPoolStatus();
         renderBackstageList();
     }
 
-    function switchTab(tab) {
-        document.getElementById('t-front').classList.remove('active');
-        document.getElementById('t-back').classList.remove('active');
-        document.getElementById('front-panel').classList.remove('active');
-        document.getElementById('back-panel').classList.remove('active');
+    // ⚡【核心新增】必殺技：讓使用者直接選檔案讀取，100% 繞過所有快取與網頁限制！
+    function importJsonFile(input) {
+        const file = input.files[0];
+        if (!file) return;
         
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (Array.isArray(data)) {
+                    nameList = data; // 直接覆蓋
+                    drawPool = [...nameList]; // 補滿可抽池
+                    renderBackstageList(); // 強制存入 LocalStorage 刷新舊數據
+                    checkPoolStatus();
+                    document.getElementById('result-display').innerText = '已成功載入 ' + data.length + ' 人！';
+                    alert('成功載入 config.json！目前名單人數共：' + data.length + ' 人');
+                } else {
+                    alert('JSON 格式錯誤，應該要是名字陣列！');
+                }
+            } catch (err) {
+                alert('讀取失敗，請確認是否為正確的 JSON 檔案！');
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    function checkPoolStatus() {
+        const drawBtn = document.getElementById('draw-btn');
+        if (drawPool.length === 0 && !isDrawing) {
+            document.getElementById('result-display').innerText = '所有人皆已中獎！';
+            drawBtn.innerText = '請點擊重設名單';
+            drawBtn.setAttribute('disabled', 'true');
+        } else if (!isDrawing) {
+            drawBtn.removeAttribute('disabled');
+            drawBtn.innerText = '開始抽籤';
+        }
+    }
+
+    function switchTab(tab) {
         if(tab === 'front') {
             document.getElementById('t-front').classList.add('active');
             document.getElementById('front-panel').classList.add('active');
+            document.getElementById('t-back').classList.remove('active');
+            document.getElementById('back-panel').classList.remove('active');
             clearInterval(timer);
             isDrawing = false;
-            document.getElementById('draw-btn').innerText = '開始抽籤';
             document.getElementById('draw-btn').style.background = 'var(--primary-color)';
-            document.getElementById('result-display').innerText = '準備抽籤...';
+            if(drawPool.length > 0) {
+                document.getElementById('result-display').innerText = '準備抽籤...';
+            }
+            checkPoolStatus();
         } else {
-            document.getElementById('t-back').classList.add('active');
-            document.getElementById('back-panel').classList.add('active');
-            renderBackstageList();
+            const inputPassword = prompt("請輸入管理員密碼以進入後台：");
+            if (inputPassword === BACKSTAGE_PASSWORD) {
+                document.getElementById('t-back').classList.add('active');
+                document.getElementById('back-panel').classList.add('active');
+                document.getElementById('t-front').classList.remove('active');
+                document.getElementById('front-panel').classList.remove('active');
+                renderBackstageList();
+            } else if (inputPassword !== null) {
+                alert("密碼錯誤，拒絕存取！");
+            }
         }
     }
 
@@ -136,8 +220,32 @@
             li.innerHTML = `<span>${name}</span><button class="btn btn-delete" onclick="deleteName(${index})">刪除</button>`;
             listUI.appendChild(li);
         });
-        document.getElementById('count-info').innerText = `目前人數：${nameList.length} 人`;
+        document.getElementById('count-info').innerText = `總名單人數：${nameList.length} 人`;
         localStorage.setItem('luckyDrawNames', JSON.stringify(nameList));
+    }
+
+    function renderHistoryList() {
+        const historyUI = document.getElementById('history-list-ui');
+        if (historyRecords.length === 0) {
+            historyUI.innerHTML = `<li style="color:#aaa; text-align:center; padding:10px;">暫無中獎紀錄</li>`;
+            return;
+        }
+        historyUI.innerHTML = '';
+        [...historyRecords].reverse().forEach(record => {
+            const li = document.createElement('li');
+            li.className = 'history-item';
+            li.innerHTML = `<span>第 ${record.round} 輪中獎者：<span class="winner-name">${record.name}</span></span> <span style="color:#999;">${record.time}</span>`;
+            historyUI.appendChild(li);
+        });
+    }
+
+    function resetDrawPool() {
+        if(nameList.length === 0) { alert('目前後台總名單為空，請先載入人名！'); return; }
+        if(confirm("確定要重設抽籤名單，讓所有人重新參與抽籤嗎？")) {
+            drawPool = [...nameList];
+            document.getElementById('result-display').innerText = '名單已重設！';
+            checkPoolStatus();
+        }
     }
 
     function addName() {
@@ -145,26 +253,32 @@
         const name = input.value.trim();
         if (name === '') return;
         nameList.push(name);
+        drawPool.push(name); 
         input.value = '';
         renderBackstageList();
     }
 
     function handleKeyPress(e) { if (e.key === 'Enter') addName(); }
-    function deleteName(index) { nameList.splice(index, 1); renderBackstageList(); }
+    function deleteName(index) { 
+        const deletedName = nameList[index];
+        nameList.splice(index, 1); 
+        const poolIdx = drawPool.indexOf(deletedName);
+        if(poolIdx !== -1) drawPool.splice(poolIdx, 1);
+        renderBackstageList();
+    }
 
-    // 匯出成標準的 JSON 檔案
     function exportJson() {
         if(nameList.length === 0) { alert('沒有名單可以匯出！'); return; }
-        const dataStr = JSON.stringify(nameList, null, 2); // 格式化縮排
+        const dataStr = JSON.stringify(nameList, null, 2);
         const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = 'names.json'; // 預設檔名直接設定好
+        link.download = 'config.json'; 
         link.click();
     }
 
     function startDraw() {
-        if (nameList.length === 0) { alert('名單內沒有人！'); return; }
+        if (drawPool.length === 0) { alert('抽籤池內已無人可抽！請點擊重設。'); return; }
         const drawBtn = document.getElementById('draw-btn');
         const display = document.getElementById('result-display');
 
@@ -172,18 +286,97 @@
             isDrawing = true;
             drawBtn.innerText = ' 🎯 停！';
             drawBtn.style.background = '#e67e22';
+            
+            shuffleList = [...drawPool];
+            for (let i = shuffleList.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffleList[i], shuffleList[j]] = [shuffleList[j], shuffleList[i]];
+            }
+            currentIndex = 0;
             timer = setInterval(() => {
-                const randomIndex = Math.floor(Math.random() * nameList.length);
-                display.innerText = nameList[randomIndex];
-            }, 50);
+                display.innerText = shuffleList[currentIndex];
+                currentIndex = (currentIndex + 1) % shuffleList.length;
+            }, 60);
         } else {
             clearInterval(timer);
             isDrawing = false;
             drawBtn.innerText = '開始抽籤';
             drawBtn.style.background = 'var(--primary-color)';
-            const finalIndex = Math.floor(Math.random() * nameList.length);
-            display.innerText = `🎉 ${nameList[finalIndex]} 🎉`;
+            
+            const winner = display.innerText;
+            display.innerHTML = `🎉 <span style="color: #e74c3c;">${winner}</span> 🎉`;
+
+            startLocalConfetti();
+
+            const winnerIdx = drawPool.indexOf(winner);
+            if (winnerIdx !== -1) drawPool.splice(winnerIdx, 1);
+
+            const now = new Date();
+            const timeStr = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+            historyRecords.push({ round: historyRecords.length + 1, name: winner, time: timeStr });
+            localStorage.setItem('luckyDrawHistory', JSON.stringify(historyRecords));
+            renderHistoryList();
+            checkPoolStatus();
         }
+    }
+
+    function clearHistory() {
+        if(confirm("確定要清空所有中獎歷史紀錄嗎？")) {
+            historyRecords = [];
+            localStorage.removeItem('luckyDrawHistory');
+            renderHistoryList();
+        }
+    }
+
+    // 原生特效引擎
+    let confettiParticles = [];
+    const canvas = document.getElementById('confetti-canvas');
+    const ctx = canvas.getContext('2d');
+    let animationFrameId = null;
+
+    function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function startLocalConfetti() {
+        confettiParticles = [];
+        for (let i = 0; i < 150; i++) {
+            confettiParticles.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height - canvas.height,
+                r: Math.random() * 6 + 4,
+                d: Math.random() * canvas.height,
+                color: `rgba(${Math.floor(Math.random()*255)},${Math.floor(Math.random()*255)},${Math.floor(Math.random()*255)},1)`,
+                tilt: Math.random() * 10 - 5,
+                tiltAngleIncremental: Math.random() * 0.07 + 0.02,
+                tiltAngle: 0
+            });
+        }
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        updateConfetti();
+    }
+
+    function updateConfetti() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        let alive = false;
+
+        confettiParticles.forEach((p) => {
+            p.tiltAngle += p.tiltAngleIncremental;
+            p.y += (Math.cos(p.d) + 3 + p.r / 2) / 2;
+            p.x += Math.sin(p.tiltAngle);
+            p.tilt = Math.sin(p.tiltAngle - p.r / 2) * 15;
+            if (p.y <= canvas.height) alive = true;
+
+            ctx.beginPath();
+            ctx.lineWidth = p.r;
+            ctx.strokeStyle = p.color;
+            ctx.moveTo(p.x + p.tilt + p.r / 2, p.y);
+            ctx.lineTo(p.x + p.tilt, p.y + p.tilt + p.r / 2);
+            ctx.stroke();
+        });
+
+        if (alive) animationFrameId = requestAnimationFrame(updateConfetti);
+        else ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 </script>
 
