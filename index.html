@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>幸運抽名字遊戲 (JSON 雲端同步版)</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #2ecc71;
+            --danger-color: #e74c3c;
+            --dark-color: #2c3e50;
+            --light-color: #ecf0f1;
+            --json-color: #f39c12;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+        body { background: #f5f7fa; color: var(--dark-color); display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 20px; }
+        .container { width: 100%; max-width: 600px; background: white; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); overflow: hidden; }
+        
+        .tabs { display: flex; background: var(--dark-color); }
+        .tab-btn { flex: 1; padding: 15px; border: none; background: transparent; color: #95a5a6; font-size: 16px; cursor: pointer; transition: 0.3s; font-weight: bold; }
+        .tab-btn.active { color: white; background: rgba(255,255,255,0.1); border-bottom: 4px solid var(--primary-color); }
+        
+        .panel { padding: 30px; display: none; }
+        .panel.active { display: block; }
+        
+        .display-box { height: 120px; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: bold; background: var(--light-color); border-radius: 8px; margin-bottom: 20px; border: 2px dashed #bdc3c7; color: var(--primary-color); overflow: hidden; text-align: center; }
+        .btn { width: 100%; padding: 12px; font-size: 18px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 10px; }
+        .btn-start { background: var(--primary-color); color: white; }
+        .btn-start:hover { background: #357abd; }
+        .btn-delete { background: var(--danger-color); color: white; padding: 5px 10px; font-size: 14px; width: auto; margin: 0; }
+        
+        .input-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        .input-txt { flex: 1; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 6px; }
+        .btn-add { background: var(--secondary-color); color: white; width: auto; margin: 0; padding: 0 20px; }
+        .name-list { list-style: none; max-height: 250px; overflow-y: auto; border: 1px solid var(--light-color); border-radius: 6px; }
+        .name-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-bottom: 1px solid var(--light-color); }
+        
+        .file-actions { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-file { flex: 1; padding: 10px; font-size: 14px; background: var(--json-color); color: white; border: none; border-radius: 6px; cursor: pointer; text-align: center; font-weight: bold; }
+        .count-info { font-size: 14px; color: #7f8c8d; align-self: center; }
+        .flex-space { display: flex; justify-content: space-between; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="tabs">
+        <button id="t-front" class="tab-btn active" onclick="switchTab('front')">🎯 抽籤前台</button>
+        <button id="t-back" class="tab-btn" onclick="switchTab('back')">⚙️ 名單後台</button>
+    </div>
+
+    <!-- 抽籤前台 -->
+    <div id="front-panel" class="panel active">
+        <div class="display-box" id="result-display">正在載入雲端名單...</div>
+        <button class="btn btn-start" id="draw-btn" onclick="startDraw()" disabled>請稍候...</button>
+    </div>
+
+    <!-- 管理後台 -->
+    <div id="back-panel" class="panel">
+        <div class="input-group">
+            <input type="text" id="name-input" class="input-txt" placeholder="輸入人名..." onkeypress="handleKeyPress(event)">
+            <button class="btn btn-add" onclick="addName()">新增</button>
+        </div>
+        <ul class="name-list" id="name-list-ui"></ul>
+        
+        <div class="flex-space">
+            <div class="count-info" id="count-info">目前人數：0 人</div>
+        </div>
+
+        <div class="file-actions">
+            <button class="btn-file" onclick="exportJson()">💾 匯出更新後的 names.json</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let nameList = [];
+    let isDrawing = false;
+    let timer = null;
+
+    // 網頁載入時，自動抓取同目錄下的 names.json
+    window.addEventListener('DOMContentLoaded', () => {
+        fetch('names.json')
+            .then(response => {
+                if (!response.ok) throw new Error('找不到 json 檔案');
+                return response.json();
+            })
+            .then(data => {
+                // 成功讀取伺服器上的 JSON 名單
+                nameList = data;
+                initApp();
+            })
+            .catch(error => {
+                console.log('無法讀取 names.json，將嘗試讀取本地快取', error);
+                // 備用方案：若沒上傳 json，則讀取本地快取或給預設值
+                nameList = JSON.parse(localStorage.getItem('luckyDrawNames')) || ['張小明', '王大同'];
+                initApp();
+            });
+    });
+
+    function initApp() {
+        document.getElementById('result-display').innerText = '準備抽籤...';
+        document.getElementById('draw-btn').removeAttribute('disabled');
+        document.getElementById('draw-btn').innerText = '開始抽籤';
+        renderBackstageList();
+    }
+
+    function switchTab(tab) {
+        document.getElementById('t-front').classList.remove('active');
+        document.getElementById('t-back').classList.remove('active');
+        document.getElementById('front-panel').classList.remove('active');
+        document.getElementById('back-panel').classList.remove('active');
+        
+        if(tab === 'front') {
+            document.getElementById('t-front').classList.add('active');
+            document.getElementById('front-panel').classList.add('active');
+            clearInterval(timer);
+            isDrawing = false;
+            document.getElementById('draw-btn').innerText = '開始抽籤';
+            document.getElementById('draw-btn').style.background = 'var(--primary-color)';
+            document.getElementById('result-display').innerText = '準備抽籤...';
+        } else {
+            document.getElementById('t-back').classList.add('active');
+            document.getElementById('back-panel').classList.add('active');
+            renderBackstageList();
+        }
+    }
+
+    function renderBackstageList() {
+        const listUI = document.getElementById('name-list-ui');
+        listUI.innerHTML = '';
+        nameList.forEach((name, index) => {
+            const li = document.createElement('li');
+            li.className = 'name-item';
+            li.innerHTML = `<span>${name}</span><button class="btn btn-delete" onclick="deleteName(${index})">刪除</button>`;
+            listUI.appendChild(li);
+        });
+        document.getElementById('count-info').innerText = `目前人數：${nameList.length} 人`;
+        localStorage.setItem('luckyDrawNames', JSON.stringify(nameList));
+    }
+
+    function addName() {
+        const input = document.getElementById('name-input');
+        const name = input.value.trim();
+        if (name === '') return;
+        nameList.push(name);
+        input.value = '';
+        renderBackstageList();
+    }
+
+    function handleKeyPress(e) { if (e.key === 'Enter') addName(); }
+    function deleteName(index) { nameList.splice(index, 1); renderBackstageList(); }
+
+    // 匯出成標準的 JSON 檔案
+    function exportJson() {
+        if(nameList.length === 0) { alert('沒有名單可以匯出！'); return; }
+        const dataStr = JSON.stringify(nameList, null, 2); // 格式化縮排
+        const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'names.json'; // 預設檔名直接設定好
+        link.click();
+    }
+
+    function startDraw() {
+        if (nameList.length === 0) { alert('名單內沒有人！'); return; }
+        const drawBtn = document.getElementById('draw-btn');
+        const display = document.getElementById('result-display');
+
+        if (!isDrawing) {
+            isDrawing = true;
+            drawBtn.innerText = ' 🎯 停！';
+            drawBtn.style.background = '#e67e22';
+            timer = setInterval(() => {
+                const randomIndex = Math.floor(Math.random() * nameList.length);
+                display.innerText = nameList[randomIndex];
+            }, 50);
+        } else {
+            clearInterval(timer);
+            isDrawing = false;
+            drawBtn.innerText = '開始抽籤';
+            drawBtn.style.background = 'var(--primary-color)';
+            const finalIndex = Math.floor(Math.random() * nameList.length);
+            display.innerText = `🎉 ${nameList[finalIndex]} 🎉`;
+        }
+    }
+</script>
+
+</body>
+</html>
